@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, Mail, Lock, User, Globe, ArrowRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import './Auth.css';
 
 const Auth = ({ onAuthSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
