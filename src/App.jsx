@@ -85,9 +85,14 @@ function App() {
             email: user.email
           }));
           checkProfileCompletion(user);
+        } else {
+          // إذا لم يكن هناك مستخدم، تأكد من إزالة أي بيانات محفوظة
+          localStorage.removeItem('profile_setup_completed');
+          setUser(null);
         }
       } catch (error) {
         console.error('Error getting user:', error);
+        setUser(null);
       } finally {
         setLoading(false);
       }
