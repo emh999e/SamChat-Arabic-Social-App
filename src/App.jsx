@@ -77,6 +77,7 @@ function App() {
     const getUser = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
+        console.log('Current user:', user); // للتشخيص
         if (user) {
           setUser(user);
           setUserProfile(prev => ({
