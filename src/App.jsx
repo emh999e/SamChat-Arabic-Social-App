@@ -3,6 +3,7 @@ import { supabase } from './lib/supabase';
 import Auth from './components/Auth';
 import ImageUpload from './components/ImageUpload';
 import ProfileSetup from './components/ProfileSetup';
+import EditProfile from './components/EditProfile';
 import './App.css';
 import { 
   Home, 
@@ -31,7 +32,11 @@ import {
   Volume2,
   Globe,
   Plus,
-  MoreHorizontal
+  MoreHorizontal,
+  MapPin,
+  Briefcase,
+  GraduationCap,
+  Save
 } from 'lucide-react';
 
 function App() {
@@ -49,6 +54,7 @@ function App() {
   const [showImageUpload, setShowImageUpload] = useState(false);
   const [imageUploadType, setImageUploadType] = useState('avatar');
   const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
   const [profileCompleted, setProfileCompleted] = useState(false);
   const [userProfile, setUserProfile] = useState({
     name: '',
@@ -112,22 +118,68 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const checkProfileCompletion = (currentUser) => {
+  const checkProfileCompletion = async (currentUser) => {
     if (!currentUser) return;
     
-    const isCompleted = localStorage.getItem('profile_setup_completed');
-    const savedProfile = localStorage.getItem(`profile_${currentUser.id}`);
-    
-    if (isCompleted === 'true' && savedProfile) {
-      const profileData = JSON.parse(savedProfile);
-      setUserProfile(prev => ({ ...prev, ...profileData }));
-      setProfileCompleted(true);
-      setShowProfileSetup(false);
-    } else if (isCompleted !== 'true') {
-      // إذا لم يكن الملف الشخصي مكتملاً، عرض نافذة الإعداد بعد تأخير
-      setTimeout(() => {
-        setShowProfileSetup(true);
-      }, 1000);
+    try {
+      // جلب بيانات الملف الشخصي من Supabase
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', currentUser.id)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error fetching profile:', error);
+        return;
+      }
+
+      if (profile) {
+        // تحديث بيانات الملف الشخصي
+        setUserProfile(prev => ({
+          ...prev,
+          name: profile.full_name || currentUser.email?.split('@')[0] || 'مستخدم',
+          email: currentUser.email,
+          avatar: profile.avatar_url || '',
+          cover: profile.cover_url || '',
+          birthDate: profile.birth_date || '',
+          gender: profile.gender || '',
+          bio: profile.bio || 'مرحباً! أنا جديد في سام شات.',
+          location: profile.location || 'الرياض، السعودية',
+          joinDate: new Date(profile.created_at).toLocaleDateString('ar-SA')
+        }));
+
+        // جلب البيانات الإضافية من localStorage مؤقتاً
+        const additionalData = localStorage.getItem(`profile_additional_${currentUser.id}`);
+        if (additionalData) {
+          const additional = JSON.parse(additionalData);
+          setUserProfile(prev => ({ ...prev, ...additional }));
+        }
+
+        // فحص إذا كان الملف الشخصي مكتملاً
+        const isCompleted = localStorage.getItem('profile_setup_completed');
+        if (isCompleted === 'true') {
+          setProfileCompleted(true);
+          setShowProfileSetup(false);
+        } else if (profile.birth_date && profile.gender) {
+          // إذا كانت البيانات الأساسية موجودة، اعتبر الملف مكتملاً
+          localStorage.setItem('profile_setup_completed', 'true');
+          setProfileCompleted(true);
+          setShowProfileSetup(false);
+        } else {
+          // عرض نافذة إكمال الملف الشخصي
+          setTimeout(() => {
+            setShowProfileSetup(true);
+          }, 1000);
+        }
+      } else {
+        // إذا لم يكن هناك ملف شخصي، عرض نافذة الإعداد
+        setTimeout(() => {
+          setShowProfileSetup(true);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Error checking profile completion:', error);
     }
   };
 
@@ -257,6 +309,11 @@ function App() {
     
     setShowProfileSetup(false);
     setProfileCompleted(true);
+  };
+
+  const handleEditProfileSave = (updatedProfile) => {
+    setUserProfile(updatedProfile);
+    setShowEditProfile(false);
   };
 
   const handleProfileSetupSkip = () => {
@@ -446,30 +503,30 @@ function App() {
         </aside>
 
         {/* شريط التنقل السفلي للجوال */}
-        <div className="bottom-nav-bar">
+        <div className="bottom-nav">
           <div 
-            className={`nav-item ${activeSection === 'home' ? 'active' : ''}`}
+            className={`bottom-nav-item ${activeSection === 'home' ? 'active' : ''}`}
             onClick={() => setActiveSection('home')}
           >
             <Home size={20} />
             <span>الرئيسية</span>
           </div>
           <div 
-            className={`nav-item ${activeSection === 'friends' ? 'active' : ''}`}
+            className={`bottom-nav-item ${activeSection === 'friends' ? 'active' : ''}`}
             onClick={() => setActiveSection('friends')}
           >
             <Users size={20} />
             <span>الأصدقاء</span>
           </div>
           <div 
-            className={`nav-item ${activeSection === 'profile' ? 'active' : ''}`}
+            className={`bottom-nav-item ${activeSection === 'profile' ? 'active' : ''}`}
             onClick={() => setActiveSection('profile')}
           >
             <User size={20} />
             <span>الملف الشخصي</span>
           </div>
           <div 
-            className={`nav-item ${activeSection === 'notifications' ? 'active' : ''}`}
+            className={`bottom-nav-item ${activeSection === 'notifications' ? 'active' : ''}`}
             onClick={() => {
               setActiveSection('notifications');
               setShowNotifications(true);
@@ -484,7 +541,7 @@ function App() {
             <span>الإشعارات</span>
           </div>
           <div 
-            className={`nav-item ${activeSection === 'messages' ? 'active' : ''}`}
+            className={`bottom-nav-item ${activeSection === 'messages' ? 'active' : ''}`}
             onClick={() => {
               setActiveSection('messages');
               setShowMessages(true);
@@ -610,7 +667,7 @@ function App() {
                   تحديث صورة الغلاف
                 </button>
               </div>
-
+              
               {/* معلومات الملف الشخصي */}
               <div className="profile-info">
                 <div className="profile-avatar">
@@ -629,19 +686,6 @@ function App() {
                 <div className="profile-details">
                   <h2>{userProfile.name}</h2>
                   <p className="profile-bio">{userProfile.bio}</p>
-                  <div className="profile-meta">
-                    <span><Calendar size={16} /> انضم في {userProfile.joinDate}</span>
-                    <span><Globe size={16} /> {userProfile.location}</span>
-                    {userProfile.birthDate && (
-                      <span><Calendar size={16} /> تاريخ الميلاد: {userProfile.birthDate}</span>
-                    )}
-                    {userProfile.gender && (
-                      <span>الجنس: {userProfile.gender}</span>
-                    )}
-                    {userProfile.maritalStatus && (
-                      <span>الحالة الاجتماعية: {userProfile.maritalStatus}</span>
-                    )}
-                  </div>
                   
                   <div className="profile-stats">
                     <div className="stat">
@@ -656,6 +700,91 @@ function App() {
                       <span className="stat-number">{userProfile.followingCount}</span>
                       <span className="stat-label">يتابع</span>
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* قسم حول */}
+              <div className="about-section">
+                <div className="section-header">
+                  <h3>حول</h3>
+                  <button 
+                    className="edit-profile-btn"
+                    onClick={() => setShowEditProfile(true)}
+                  >
+                    <Edit size={16} />
+                    تعديل التفاصيل
+                  </button>
+                </div>
+                
+                <div className="about-content">
+                  {userProfile.location && (
+                    <div className="about-item">
+                      <MapPin size={16} />
+                      <span>يعيش في {userProfile.location}</span>
+                    </div>
+                  )}
+                  
+                  {userProfile.birthDate && (
+                    <div className="about-item">
+                      <Calendar size={16} />
+                      <span>تاريخ الميلاد: {new Date(userProfile.birthDate).toLocaleDateString('ar-SA')}</span>
+                    </div>
+                  )}
+                  
+                  {userProfile.gender && (
+                    <div className="about-item">
+                      <User size={16} />
+                      <span>الجنس: {userProfile.gender === 'male' ? 'ذكر' : userProfile.gender === 'female' ? 'أنثى' : 'آخر'}</span>
+                    </div>
+                  )}
+                  
+                  {userProfile.workplace && (
+                    <div className="about-item">
+                      <Briefcase size={16} />
+                      <span>يعمل في {userProfile.workplace}</span>
+                    </div>
+                  )}
+                  
+                  {userProfile.work && (
+                    <div className="about-item">
+                      <Briefcase size={16} />
+                      <span>المسمى الوظيفي: {userProfile.work}</span>
+                    </div>
+                  )}
+                  
+                  {userProfile.education && (
+                    <div className="about-item">
+                      <GraduationCap size={16} />
+                      <span>درس في {userProfile.education}</span>
+                    </div>
+                  )}
+                  
+                  {userProfile.relationship_status && (
+                    <div className="about-item">
+                      <Heart size={16} />
+                      <span>الحالة الاجتماعية: {
+                        userProfile.relationship_status === 'single' ? 'أعزب' :
+                        userProfile.relationship_status === 'married' ? 'متزوج' :
+                        userProfile.relationship_status === 'engaged' ? 'مخطوب' :
+                        userProfile.relationship_status === 'divorced' ? 'مطلق' :
+                        userProfile.relationship_status === 'widowed' ? 'أرمل' :
+                        userProfile.relationship_status === 'complicated' ? 'معقدة' :
+                        userProfile.relationship_status
+                      }</span>
+                    </div>
+                  )}
+                  
+                  {userProfile.website && (
+                    <div className="about-item">
+                      <Globe size={16} />
+                      <a href={userProfile.website} target="_blank" rel="noopener noreferrer">{userProfile.website}</a>
+                    </div>
+                  )}
+                  
+                  <div className="about-item">
+                    <Calendar size={16} />
+                    <span>انضم في {userProfile.joinDate}</span>
                   </div>
                 </div>
               </div>
@@ -815,6 +944,16 @@ function App() {
           user={user}
           onComplete={handleProfileSetupComplete}
           onSkip={handleProfileSetupSkip}
+        />
+      )}
+
+      {/* نافذة تعديل الملف الشخصي */}
+      {showEditProfile && (
+        <EditProfile
+          user={user}
+          userProfile={userProfile}
+          onClose={() => setShowEditProfile(false)}
+          onSave={handleEditProfileSave}
         />
       )}
     </div>

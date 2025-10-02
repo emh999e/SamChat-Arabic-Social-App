@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Calendar, Heart, MapPin, Briefcase, GraduationCap, X, Building } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 const ProfileSetup = ({ user, onComplete, onSkip }) => {
   const [formData, setFormData] = useState({
@@ -15,6 +16,8 @@ const ProfileSetup = ({ user, onComplete, onSkip }) => {
   });
 
   const [currentStep, setCurrentStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const totalSteps = 3;
 
   const handleInputChange = (field, value) => {
@@ -38,20 +41,52 @@ const ProfileSetup = ({ user, onComplete, onSkip }) => {
     }
   };
 
-  const handleComplete = () => {
-    // حفظ البيانات في localStorage
-    const profileData = {
-      ...formData,
-      user_id: user?.id || 'anonymous',
-      user_email: user?.email || '',
-      completed_at: new Date().toISOString()
-    };
+  const handleComplete = async () => {
+    setLoading(true);
+    setError('');
     
-    localStorage.setItem(`profile_${user?.id || 'anonymous'}`, JSON.stringify(profileData));
-    localStorage.setItem('profile_setup_completed', 'true');
-    
-    // إغلاق النافذة
-    onComplete(profileData);
+    try {
+      // حفظ البيانات في Supabase
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          location: formData.location || null,
+          birth_date: formData.birth_date || null,
+          gender: formData.gender || null,
+          website: formData.website || null,
+          // إضافة الحقول الجديدة إلى جدول profiles إذا لم تكن موجودة
+          // workplace: formData.workplace || null,
+          // work: formData.work || null,
+          // education: formData.education || null,
+          // relationship_status: formData.relationship_status || null,
+          // phone: formData.phone || null
+        })
+        .eq('id', user.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // حفظ البيانات الإضافية في localStorage مؤقتاً حتى يتم إضافتها للجدول
+      const additionalData = {
+        workplace: formData.workplace,
+        work: formData.work,
+        education: formData.education,
+        relationship_status: formData.relationship_status,
+        phone: formData.phone
+      };
+      
+      localStorage.setItem(`profile_additional_${user.id}`, JSON.stringify(additionalData));
+      localStorage.setItem('profile_setup_completed', 'true');
+      
+      // إغلاق النافذة
+      onComplete(formData);
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      setError('حدث خطأ أثناء حفظ المعلومات. يرجى المحاولة مرة أخرى.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleClose = () => {
@@ -148,24 +183,6 @@ const ProfileSetup = ({ user, onComplete, onSkip }) => {
           placeholder="الجامعة أو المؤسسة التعليمية"
         />
       </div>
-      <div className="form-group">
-        <label>الموقع الإلكتروني</label>
-        <input
-          type="url"
-          value={formData.website}
-          onChange={(e) => handleInputChange('website', e.target.value)}
-          placeholder="https://example.com"
-        />
-      </div>
-      <div className="form-group">
-        <label>رقم الهاتف</label>
-        <input
-          type="tel"
-          value={formData.phone}
-          onChange={(e) => handleInputChange('phone', e.target.value)}
-          placeholder="+966 50 123 4567"
-        />
-      </div>
     </div>
   );
 
@@ -207,22 +224,28 @@ const ProfileSetup = ({ user, onComplete, onSkip }) => {
           {renderCurrentStep()}
         </div>
 
+        {error && (
+          <div className="error-message" style={{ margin: '1rem', padding: '0.75rem', backgroundColor: '#fee', color: '#c33', borderRadius: '0.5rem', fontSize: '0.875rem' }}>
+            {error}
+          </div>
+        )}
+
         <div className="profile-setup-actions">
           {currentStep > 1 && (
-            <button className="btn-secondary" onClick={handlePrevious}>
+            <button className="btn-secondary" onClick={handlePrevious} disabled={loading}>
               السابق
             </button>
           )}
           <div className="actions-right">
-            <button className="btn-outline" onClick={handleClose}>
+            <button className="btn-outline" onClick={handleClose} disabled={loading}>
               تخطي
             </button>
             <button 
               className="btn-primary" 
               onClick={handleNext}
-              disabled={!canProceed()}
+              disabled={!canProceed() || loading}
             >
-              {currentStep === totalSteps ? 'إنهاء' : 'التالي'}
+              {loading ? 'جاري الحفظ...' : (currentStep === totalSteps ? 'إنهاء' : 'التالي')}
             </button>
           </div>
         </div>
