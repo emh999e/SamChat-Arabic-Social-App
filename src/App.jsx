@@ -117,6 +117,7 @@ function App() {
   useEffect(() => {
     if (user) {
       loadUserNews(user.id);
+      loadUserReels(user.id);
     }
 
     const path = window.location.pathname;
@@ -192,48 +193,66 @@ function App() {
         console.error("Error loading user news:", error);
         return;
       }
-      setUserNews(data);
+      setUserNews(data || []);
     } catch (error) {
       console.error("Error loading user news:", error);
     }
   };
 
-  const loadPosts = () => {
-    const samplePosts = [
-      {
-        id: 1,
-        author: 'أحمد محمد',
-        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
-        content: 'مرحباً بالجميع في سام شات! أتطلع للتواصل معكم جميعاً 🌟',
-        timestamp: 'منذ ساعتين',
-        likes: 24,
-        comments: 8,
-        shares: 3,
-        image: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=500&h=300&fit=crop'
-      },
-      {
-        id: 2,
-        author: 'فاطمة العلي',
-        avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face',
-        content: 'يوم جميل للتنزه في الحديقة مع الأصدقاء! الطقس رائع اليوم ☀️',
-        timestamp: 'منذ 4 ساعات',
-        likes: 42,
-        comments: 12,
-        shares: 6
-      },
-      {
-        id: 3,
-        author: 'محمد السعيد',
-        avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face',
-        content: 'شاركت اليوم في مؤتمر التقنية. كان هناك الكثير من الأفكار المبتكرة! 💡',
-        timestamp: 'منذ 6 ساعات',
-        likes: 18,
-        comments: 5,
-        shares: 2,
-        image: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=500&h=300&fit=crop'
+  const loadUserReels = async (userId) => {
+    if (!userId) return;
+    try {
+      const { data, error } = await supabase
+        .from("reels_posts")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Error loading user reels:", error);
+        return;
       }
-    ];
-    setPosts(samplePosts);
+      setUserReels(data || []);
+    } catch (error) {
+      console.error("Error loading user reels:", error);
+    }
+  };
+
+  const loadPosts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("posts")
+        .select(`
+          id,
+          content,
+          image_url,
+          video_url,
+          created_at,
+          profiles (username, avatar_url)
+        `)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Error loading posts:", error);
+        return;
+      }
+
+      const formattedPosts = data.map(post => ({
+        id: post.id,
+        author: post.profiles.username,
+        avatar: post.profiles.avatar_url || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+        content: post.content,
+        timestamp: new Date(post.created_at).toLocaleString("ar-SA", { dateStyle: "medium", timeStyle: "short" }),
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        image: post.image_url,
+        video: post.video_url
+      }));
+      setPosts(formattedPosts);
+    } catch (error) {
+      console.error("Error loading posts:", error);
+    }
   };
 
   const handleLogout = async () => {
@@ -258,6 +277,7 @@ function App() {
       setActiveSection('home');
       setShowProfileSetup(false);
       setProfileCompleted(false);
+      localStorage.removeItem('profile_setup_completed');
     } catch (error) {
       console.error('Error logging out:', error);
     }
@@ -267,19 +287,38 @@ function App() {
     if (!content.trim() || !user) return;
 
     try {
-      const newPost = {
-        id: Date.now(),
-        author: userProfile.name,
-        avatar: userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
-        content: content.trim(),
-        timestamp: 'الآن',
-        likes: 0,
-        comments: 0,
-        shares: 0
-      };
+      const { data, error } = await supabase
+        .from("posts")
+        .insert({
+          user_id: user.id,
+          content: content.trim(),
+          image_url: null,
+          video_url: null,
+          privacy: 'public'
+        })
+        .select();
 
-      setPosts(prevPosts => [newPost, ...prevPosts]);
-      setNewPostContent('');
+      if (error) {
+        console.error("Error creating post:", error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const newPost = {
+          id: data[0].id,
+          author: userProfile.name,
+          avatar: userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+          content: data[0].content,
+          timestamp: 'الآن',
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          image: data[0].image_url,
+          video: data[0].video_url
+        };
+        setPosts(prevPosts => [newPost, ...prevPosts]);
+        setNewPostContent('');
+      }
     } catch (error) {
       console.error('Error creating post:', error);
     }
@@ -296,6 +335,9 @@ function App() {
           author_name: userProfile.name,
           author_avatar: userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
           content: content.trim(),
+          likes: 0,
+          comments: 0,
+          shares: 0
         })
         .select();
 
@@ -317,20 +359,29 @@ function App() {
     if (!content.trim() || !user) return;
 
     try {
-      const newReel = {
-        id: Date.now(),
-        author: userProfile.name,
-        avatar: userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
-        content: content.trim(),
-        timestamp: 'الآن',
-        likes: 0,
-        comments: 0,
-        shares: 0,
-        views: 0
-      };
+      const { data, error } = await supabase
+        .from("reels_posts")
+        .insert({
+          user_id: user.id,
+          author_name: userProfile.name,
+          author_avatar: userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+          content: content.trim(),
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          views: 0
+        })
+        .select();
 
-      setUserReels(prevReels => [newReel, ...prevReels]);
-      setNewReelContent('');
+      if (error) {
+        console.error("Error creating reel:", error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setUserReels(prevReels => [data[0], ...prevReels]);
+        setNewReelContent('');
+      }
     } catch (error) {
       console.error('Error creating reel:', error);
     }
@@ -365,7 +416,6 @@ function App() {
       setShowImageUpload(false);
     } catch (error) {
       console.error('Error updating image:', error);
-      // Optionally, revert UI change or show error message
     }
   };
 
@@ -411,14 +461,528 @@ function App() {
     return <Auth />;
   }
 
+  const renderContent = () => {
+    switch (activeSection) {
+      case 'home':
+        return (
+          <div className="center-content">
+            {/* قسم إنشاء المنشور المحسن */}
+            <div className="create-post-enhanced">
+              <div className="post-form-main">
+                <div className="post-form-left">
+                  <img 
+                    src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face'} 
+                    alt="صورتك الشخصية"
+                    className="post-avatar"
+                  />
+                </div>
+                <div className="post-form-content">
+                  <textarea 
+                    placeholder={`ما الذي تفكر فيه، ${userProfile.name || 'صديق'}؟`}
+                    className="post-textarea"
+                    value={newPostContent}
+                    onChange={(e) => setNewPostContent(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        createPost(newPostContent);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="post-form-actions-horizontal">
+                <div className="post-actions-left">
+                  <button className="post-action-enhanced">
+                    <Image size={20} />
+                    صورة
+                  </button>
+                  <button className="post-action-enhanced">
+                    <Video size={20} />
+                    فيديو
+                  </button>
+                  <button className="post-action-enhanced">
+                    <Smile size={20} />
+                    مشاعر
+                  </button>
+                </div>
+                <div className="post-actions-right">
+                  <button 
+                    className="post-btn-enhanced"
+                    onClick={() => createPost(newPostContent)}
+                    disabled={!newPostContent.trim()}
+                  >
+                    نشر
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* المنشورات */}
+            <div className="posts-container">
+              {posts.map((post) => (
+                <div key={post.id} className="post">
+                  <div className="post-header">
+                    <img 
+                      src={post.avatar} 
+                      alt="صورة المستخدم"
+                    />
+                    <div className="post-info">
+                      <h4>{post.author || 'مستخدم'}</h4>
+                      <span className="post-time">{post.timestamp}</span>
+                    </div>
+                    <button className="post-menu">
+                      <MoreHorizontal size={20} />
+                    </button>
+                  </div>
+                  <div className="post-content">
+                    <p>{post.content}</p>
+                    {post.image && <img src={post.image} alt="صورة المنشور" className="post-image" />}
+                    {post.video && <video src={post.video} controls className="post-image" />}
+                  </div>
+                  {(post.likes > 0 || post.comments > 0 || post.shares > 0) && (
+                    <div className="post-stats">
+                      <span>{post.likes} إعجاب</span>
+                      <span>{post.comments} تعليق</span>
+                      <span>{post.shares} مشاركة</span>
+                    </div>
+                  )}
+                  <div className="post-actions">
+                    <button className="action-btn">
+                      <Heart size={20} />
+                      إعجاب
+                    </button>
+                    <button className="action-btn">
+                      <MessageSquare size={20} />
+                      تعليق
+                    </button>
+                    <button className="action-btn">
+                      <Share2 size={20} />
+                      مشاركة
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+
+      case 'profile':
+        return (
+          <div className="center-content">
+            {/* قسم الملف الشخصي */}
+            <div className="profile-section">
+              <div 
+                className="cover-photo"
+                style={{
+                  backgroundImage: userProfile.cover 
+                    ? `url(${userProfile.cover})` 
+                    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                }}
+              >
+                <button 
+                  className="edit-cover-btn"
+                  onClick={() => handleImageUpload('cover')}
+                >
+                  <Edit size={16} />
+                  تعديل الغلاف
+                </button>
+              </div>
+              
+              <div className="profile-info">
+                <div className="profile-avatar-wrapper">
+                  <img 
+                    src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face'} 
+                    alt="الصورة الشخصية"
+                    className="profile-avatar"
+                  />
+                  <button 
+                    className="edit-avatar-btn"
+                    onClick={() => handleImageUpload('avatar')}
+                  >
+                    <Edit size={16} />
+                  </button>
+                </div>
+                
+                <h2>{userProfile.name || 'مستخدم'}</h2>
+                <p className="profile-bio">{userProfile.bio}</p>
+                
+                <div className="profile-stats">
+                  <span>{userProfile.friendsCount} صديق</span>
+                  <span>{userProfile.followersCount} متابع</span>
+                  <span>{userProfile.followingCount} متابَع</span>
+                </div>
+                
+                <button 
+                  className="edit-profile-btn"
+                  onClick={() => setShowEditProfile(true)}
+                >
+                  <Edit size={16} />
+                  تعديل الملف الشخصي
+                </button>
+              </div>
+              
+              <div className="profile-about">
+                <h3>حول</h3>
+                <div className="about-items">
+                  <div className="about-item">
+                    <MapPin size={16} />
+                    <span>{userProfile.location}</span>
+                  </div>
+                  <div className="about-item">
+                    <Calendar size={16} />
+                    <span>انضم في {userProfile.joinDate}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* قسمي الأخبار والريلز */}
+            <div className="profile-content-tabs">
+              <div className="content-tabs-header">
+                <button 
+                  className={`content-tab ${activeProfileTab === 'news' ? 'active' : ''}`}
+                  onClick={() => setActiveProfileTab('news')}
+                >
+                  <FileText size={20} />
+                  الأخبار
+                </button>
+                <button 
+                  className={`content-tab ${activeProfileTab === 'reels' ? 'active' : ''}`}
+                  onClick={() => setActiveProfileTab('reels')}
+                >
+                  <Play size={20} />
+                  الريلز
+                </button>
+              </div>
+
+              {activeProfileTab === 'news' && (
+                <div className="news-section-dynamic">
+                  <div className="create-news">
+                    <div className="post-header">
+                      <img 
+                        src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face'} 
+                        alt="صورتك الشخصية"
+                      />
+                      <input 
+                        type="text"
+                        placeholder="شارك خبراً جديداً..."
+                        value={newNewsContent}
+                        onChange={(e) => setNewNewsContent(e.target.value)}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            createNews(newNewsContent);
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="post-actions">
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className="post-action">
+                          <Image size={16} />
+                          صورة
+                        </button>
+                        <button className="post-action">
+                          <Video size={16} />
+                          فيديو
+                        </button>
+                      </div>
+                      <button 
+                        className="post-btn"
+                        onClick={() => createNews(newNewsContent)}
+                        disabled={!newNewsContent.trim()}
+                      >
+                        نشر
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="news-container">
+                    {userNews.length > 0 ? (
+                      userNews.map((news) => (
+                        <div key={news.id} className="news-post">
+                          <div className="news-post-header">
+                            <div className="author-info">
+                              <img 
+                                src={news.author_avatar || userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face'} 
+                                alt="صورة المؤلف"
+                              />
+                              <div>
+                                <h4>{news.author_name || userProfile.name}</h4>
+                                <span className="post-time">
+                                  {new Date(news.created_at).toLocaleString("ar-SA", { dateStyle: "medium", timeStyle: "short" })}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="post-content">
+                            <p>{news.content}</p>
+                          </div>
+                          <div className="post-stats">
+                            <span>{news.likes} إعجاب</span>
+                            <span>{news.comments} تعليق</span>
+                            <span>{news.shares} مشاركة</span>
+                          </div>
+                          <div className="post-actions">
+                            <button className="action-btn">
+                              <Heart size={16} />
+                              إعجاب
+                            </button>
+                            <button className="action-btn">
+                              <MessageSquare size={16} />
+                              تعليق
+                            </button>
+                            <button className="action-btn">
+                              <Share2 size={16} />
+                              مشاركة
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="empty-state">
+                        <div className="empty-icon">
+                          <FileText size={48} />
+                        </div>
+                        <h3>لا توجد أخبار بعد</h3>
+                        <p>ابدأ بمشاركة أول خبر لك!</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeProfileTab === 'reels' && (
+                <div className="reels-section-dynamic">
+                  <div className="create-reel">
+                    <div className="post-header">
+                      <img 
+                        src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face'} 
+                        alt="صورتك الشخصية"
+                      />
+                      <input 
+                        type="text"
+                        placeholder="أنشئ ريل جديد..."
+                        value={newReelContent}
+                        onChange={(e) => setNewReelContent(e.target.value)}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            createReel(newReelContent);
+                          }
+                        }}
+                      />
+                    </div>
+                    <div className="post-actions">
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className="post-action">
+                          <Video size={16} />
+                          فيديو
+                        </button>
+                        <button className="post-action">
+                          <Volume2 size={16} />
+                          صوت
+                        </button>
+                      </div>
+                      <button 
+                        className="post-btn"
+                        onClick={() => createReel(newReelContent)}
+                        disabled={!newReelContent.trim()}
+                      >
+                        نشر
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="reels-container">
+                    {userReels.length > 0 ? (
+                      userReels.map((reel) => (
+                        <div key={reel.id} className="reel-post">
+                          <div className="reel-post-header">
+                            <div className="author-info">
+                              <img 
+                                src={reel.author_avatar || userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face'} 
+                                alt="صورة المؤلف"
+                              />
+                              <div>
+                                <h4>{reel.author_name || userProfile.name}</h4>
+                                <span className="post-time">
+                                  {new Date(reel.created_at).toLocaleString("ar-SA", { dateStyle: "medium", timeStyle: "short" })}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="post-content">
+                            <p>{reel.content}</p>
+                          </div>
+                          <div className="post-stats">
+                            <span>{reel.views} مشاهدة</span>
+                            <span>{reel.likes} إعجاب</span>
+                            <span>{reel.comments} تعليق</span>
+                          </div>
+                          <div className="post-actions">
+                            <button className="action-btn">
+                              <Heart size={16} />
+                              إعجاب
+                            </button>
+                            <button className="action-btn">
+                              <MessageSquare size={16} />
+                              تعليق
+                            </button>
+                            <button className="action-btn">
+                              <Share2 size={16} />
+                              مشاركة
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="empty-state">
+                        <div className="empty-icon">
+                          <Play size={48} />
+                        </div>
+                        <h3>لا توجد ريلز بعد</h3>
+                        <p>ابدأ بإنشاء أول ريل لك!</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+
+      case 'reels':
+        return (
+          <div className="center-content">
+            <div className="reels-main-section">
+              <h2>الريلز</h2>
+              <div className="create-reel-main">
+                <div className="post-form-main">
+                  <div className="post-form-left">
+                    <img 
+                      src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face'} 
+                      alt="صورتك الشخصية"
+                      className="post-avatar"
+                    />
+                  </div>
+                  <div className="post-form-content">
+                    <textarea 
+                      placeholder={`أنشئ ريل جديد، ${userProfile.name || 'صديق'}؟`}
+                      className="post-textarea"
+                      value={newReelContent}
+                      onChange={(e) => setNewReelContent(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          createReel(newReelContent);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="post-form-actions-horizontal">
+                  <div className="post-actions-left">
+                    <button className="post-action-enhanced">
+                      <Video size={20} />
+                      فيديو
+                    </button>
+                    <button className="post-action-enhanced">
+                      <Volume2 size={20} />
+                      صوت
+                    </button>
+                  </div>
+                  <div className="post-actions-right">
+                    <button 
+                      className="post-btn-enhanced"
+                      onClick={() => createReel(newReelContent)}
+                      disabled={!newReelContent.trim()}
+                    >
+                      نشر ريل
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="reels-container">
+                {userReels.length > 0 ? (
+                  userReels.map((reel) => (
+                    <div key={reel.id} className="reel-post">
+                      <div className="reel-post-header">
+                        <div className="author-info">
+                          <img 
+                            src={reel.author_avatar || userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face'} 
+                            alt="صورة المؤلف"
+                          />
+                          <div>
+                            <h4>{reel.author_name || userProfile.name}</h4>
+                            <span className="post-time">
+                              {new Date(reel.created_at).toLocaleString("ar-SA", { dateStyle: "medium", timeStyle: "short" })}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="post-content">
+                        <p>{reel.content}</p>
+                      </div>
+                      <div className="post-stats">
+                        <span>{reel.views} مشاهدة</span>
+                        <span>{reel.likes} إعجاب</span>
+                        <span>{reel.comments} تعليق</span>
+                      </div>
+                      <div className="post-actions">
+                        <button className="action-btn">
+                          <Heart size={16} />
+                          إعجاب
+                        </button>
+                        <button className="action-btn">
+                          <MessageSquare size={16} />
+                          تعليق
+                        </button>
+                        <button className="action-btn">
+                          <Share2 size={16} />
+                          مشاركة
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-state">
+                    <div className="empty-icon">
+                      <Play size={48} />
+                    </div>
+                    <h3>لا توجد ريلز بعد</h3>
+                    <p>ابدأ بإنشاء أول ريل لك!</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+
+      default:
+        return (
+          <div className="center-content">
+            <h2>قريباً...</h2>
+            <p>هذا القسم قيد التطوير</p>
+          </div>
+        );
+    }
+  };
+
   return (
     <div className="app" onClick={closeAllDropdowns}>
+      {/* الرأس */}
       <header className="header">
         <div className="header-content">
           <div className="header-left">
             <div className="logo">
               <h1>سام شات</h1>
             </div>
+          </div>
+          
+          <div className="header-center">
             <div className="search-bar">
               <Search size={20} />
               <input type="text" placeholder="البحث في سام شات..." />
@@ -448,12 +1012,13 @@ function App() {
                       </div>
                     </div>
                     <div className="message-item">
-                      <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="محمد" />
+                      <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="أحمد" />
                       <div>
-                        <span>محمد السعيد</span>
-                        <p>شكراً لك على المساعدة</p>
+                        <span>أحمد محمد</span>
+                        <p>هل يمكننا الاجتماع غداً؟</p>
                       </div>
                     </div>
+                    <button className="view-all-btn">عرض جميع الرسائل</button>
                   </div>
                 )}
               </div>
@@ -469,20 +1034,23 @@ function App() {
                   <span className="notification-badge">{unreadNotifications}</span>
                 )}
                 {showNotifications && (
-                  <div className="dropdown notifications-dropdown">
+                  <div className="dropdown">
                     <h3>الإشعارات</h3>
                     <div className="notification-item">
-                      <span>أعجب أحمد بمنشورك</span>
-                      <small>منذ 5 دقائق</small>
+                      <img src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=40&h=40&fit=crop&crop=face" alt="سارة" />
+                      <div>
+                        <span>سارة أحمد</span>
+                        <small>أعجبت بمنشورك</small>
+                      </div>
                     </div>
                     <div className="notification-item">
-                      <span>علقت فاطمة على صورتك</span>
-                      <small>منذ ساعة</small>
+                      <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face" alt="محمد" />
+                      <div>
+                        <span>محمد علي</span>
+                        <small>علق على منشورك</small>
+                      </div>
                     </div>
-                    <div className="notification-item">
-                      <span>تابعك محمد</span>
-                      <small>منذ ساعتين</small>
-                    </div>
+                    <button className="view-all-btn">عرض جميع الإشعارات</button>
                   </div>
                 )}
               </div>
@@ -497,17 +1065,13 @@ function App() {
                 {showSettings && (
                   <div className="dropdown settings-dropdown">
                     <h3>الإعدادات</h3>
+                    <div className="setting-item" onClick={() => setActiveSection('profile')}>
+                      <User size={20} />
+                      <span>الملف الشخصي</span>
+                    </div>
                     <div className="setting-item">
                       <Shield size={20} />
-                      <span>الخصوصية والأمان</span>
-                    </div>
-                    <div className="setting-item">
-                      <Volume2 size={20} />
-                      <span>الإشعارات والأصوات</span>
-                    </div>
-                    <div className="setting-item">
-                      <Globe size={20} />
-                      <span>اللغة</span>
+                      <span>الخصوصية</span>
                     </div>
                     <div className="setting-item" onClick={handleLogout}>
                       <LogOut size={20} />
@@ -516,525 +1080,71 @@ function App() {
                   </div>
                 )}
               </div>
-
-              <div className="profile-menu" onClick={(e) => {
-                e.stopPropagation();
-                setActiveSection('profile');
-                closeAllDropdowns();
-              }}>
-                <img 
-                  src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face'} 
-                  alt={userProfile.name}
-                />
-              </div>
             </div>
           </div>
         </div>
       </header>
 
+      {/* المحتوى الرئيسي */}
       <div className="main-content">
         {/* الشريط الجانبي الأيسر */}
         <aside className="sidebar left-sidebar">
-          <div className="sidebar-item" onClick={() => setActiveSection('profile')}>
-            <img 
-              src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face'} 
-              alt={userProfile.name}
-            />
-            <span>{userProfile.name}</span>
-          </div>
           <div className="sidebar-item" onClick={() => setActiveSection('home')}>
-            <Home size={20} />
+            <Home size={24} />
             <span>الرئيسية</span>
           </div>
+          <div className="sidebar-item" onClick={() => setActiveSection('profile')}>
+            <User size={24} />
+            <span>الملف الشخصي</span>
+          </div>
           <div className="sidebar-item" onClick={() => setActiveSection('friends')}>
-            <Users size={20} />
+            <Users size={24} />
             <span>الأصدقاء</span>
           </div>
-          <div className="sidebar-item" onClick={() => setActiveSection('news')}>
-            <FileText size={20} />
-            <span>الأخبار</span>
-          </div>
-          <div className="sidebar-item" onClick={() => setActiveSection('reels')}>
-            <Play size={20} />
-            <span>الريلز</span>
-          </div>
           <div className="sidebar-item" onClick={() => setActiveSection('groups')}>
-            <Users2 size={20} />
+            <Users2 size={24} />
             <span>المجموعات</span>
           </div>
           <div className="sidebar-item" onClick={() => setActiveSection('pages')}>
-            <BookOpen size={20} />
+            <FileText size={24} />
             <span>الصفحات</span>
-          </div>
-          <div className="sidebar-item" onClick={() => setActiveSection('events')}>
-            <Calendar size={20} />
-            <span>المناسبات</span>
-          </div>
-          <div className="sidebar-item" onClick={() => setActiveSection('trending')}>
-            <TrendingUp size={20} />
-            <span>المواضيع الرائجة</span>
           </div>
         </aside>
 
-        {/* المحتوى الرئيسي */}
-        <main className="center-content">
-          {activeSection === 'home' && (
-            <div className="home-section">
-              {/* إنشاء منشور */}
-              <div className="create-post">
-                <div className="post-header">
-                  <img 
-                    src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face'} 
-                    alt={userProfile.name}
-                  />
-                  <input
-                    type="text"
-                    placeholder="بماذا تفكر يا {userProfile.name}؟"
-                    value={newPostContent}
-                    onChange={(e) => setNewPostContent(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter' && newPostContent.trim()) {
-                        createPost(newPostContent);
-                      }
-                    }}
-                  />
-                </div>
-                <div className="post-actions">
-                  <button className="post-action">
-                    <Image size={20} />
-                    <span>صورة</span>
-                  </button>
-                  <button className="post-action">
-                    <Video size={20} />
-                    <span>فيديو</span>
-                  </button>
-                  <button className="post-action">
-                    <Smile size={20} />
-                    <span>مشاعر</span>
-                  </button>
-                  <button 
-                    className="post-btn"
-                    onClick={() => createPost(newPostContent)}
-                    disabled={!newPostContent.trim()}
-                  >
-                    نشر
-                  </button>
-                </div>
-              </div>
-
-              {/* المنشورات */}
-              <div className="posts-container">
-                {posts.map(post => (
-                  <div key={post.id} className="post">
-                    <div className="post-header">
-                      <img src={post.avatar} alt={post.author} />
-                      <div className="post-info">
-                        <h4>{post.author}</h4>
-                        <span className="post-time">{post.timestamp}</span>
-                      </div>
-                      <button className="post-menu">
-                        <MoreHorizontal size={20} />
-                      </button>
-                    </div>
-                    
-                    <div className="post-content">
-                      <p>{post.content}</p>
-                      {post.image && (
-                        <img src={post.image} alt="منشور" className="post-image" />
-                      )}
-                    </div>
-                    
-                    <div className="post-stats">
-                      <span>{post.likes} إعجاب</span>
-                      <span>{post.comments} تعليق</span>
-                      <span>{post.shares} مشاركة</span>
-                    </div>
-                    
-                    <div className="post-actions">
-                      <button className="action-btn">
-                        <Heart size={20} />
-                        <span>إعجاب</span>
-                      </button>
-                      <button className="action-btn">
-                        <MessageSquare size={20} />
-                        <span>تعليق</span>
-                      </button>
-                      <button className="action-btn">
-                        <Share2 size={20} />
-                        <span>مشاركة</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {activeSection === 'profile' && (
-            <div className="profile-section">
-              {/* صورة الغلاف */}
-              <div className="cover-photo">
-                <img 
-                  src={userProfile.cover || 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&h=300&fit=crop'} 
-                  alt="صورة الغلاف" 
-                />
-                <button 
-                  className="edit-cover-btn"
-                  onClick={() => handleImageUpload('cover')}
-                >
-                  <Edit size={16} />
-                  تحديث صورة الغلاف
-                </button>
-              </div>
-              
-              {/* معلومات الملف الشخصي */}
-              <div className="profile-info">
-                <div className="profile-avatar">
-                  <img 
-                    src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face'} 
-                    alt={userProfile.name}
-                  />
-                  <button 
-                    className="edit-avatar-btn"
-                    onClick={() => handleImageUpload('avatar')}
-                  >
-                    <Edit size={16} />
-                  </button>
-                </div>
-                
-                <div className="profile-details">
-                  <h2>{userProfile.name}</h2>
-                  <p className="profile-bio">{userProfile.bio}</p>
-                  
-                  <div className="profile-stats">
-                    <div className="stat">
-                      <span className="stat-number">{userProfile.friendsCount}</span>
-                      <span className="stat-label">صديق</span>
-                    </div>
-                    <div className="stat">
-                      <span className="stat-number">{userProfile.followersCount}</span>
-                      <span className="stat-label">متابع</span>
-                    </div>
-                    <div className="stat">
-                      <span className="stat-number">{userProfile.followingCount}</span>
-                      <span className="stat-label">يتابع</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* قسم حول */}
-              <div className="about-section">
-                <div className="section-header">
-                  <h3>حول</h3>
-                  <button 
-                    className="edit-profile-btn"
-                    onClick={() => setShowEditProfile(true)}
-                  >
-                    <Edit size={16} />
-                    تعديل التفاصيل
-                  </button>
-                </div>
-                
-                <div className="about-content">
-                  {userProfile.location && (
-                    <div className="about-item">
-                      <MapPin size={16} />
-                      <span>يعيش في {userProfile.location}</span>
-                    </div>
-                  )}
-                  
-                  {userProfile.birthDate && (
-                    <div className="about-item">
-                      <Calendar size={16} />
-                      <span>تاريخ الميلاد: {new Date(userProfile.birthDate).toLocaleDateString('ar-SA')}</span>
-                    </div>
-                  )}
-                  
-                  {userProfile.gender && (
-                    <div className="about-item">
-                      <User size={16} />
-                      <span>الجنس: {userProfile.gender === 'male' ? 'ذكر' : userProfile.gender === 'female' ? 'أنثى' : 'آخر'}</span>
-                    </div>
-                  )}
-                  
-                  {userProfile.maritalStatus && (
-                    <div className="about-item">
-                      <Heart size={16} />
-                      <span>الحالة الاجتماعية: {userProfile.maritalStatus}</span>
-                    </div>
-                  )}
-                  
-                  <div className="about-item">
-                    <Briefcase size={16} />
-                    <span>يعمل في شركة سام شات</span>
-                  </div>
-                  <div className="about-item">
-                    <GraduationCap size={16} />
-                    <span>درس في جامعة سام شات</span>
-                  </div>
-                  <div className="about-item">
-                    <Calendar size={16} />
-                    <span>انضم في {userProfile.joinDate}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* قسم الأخبار */}
-              <div className="news-feed-section">
-                <div className="section-header">
-                  <h3>آخر الأخبار</h3>
-                  <button className="create-news-btn">
-                    <Plus size={16} />
-                    إنشاء خبر جديد
-                  </button>
-                </div>
-
-                {/* إنشاء خبر */}
-                <div className="create-news">
-                  <div className="post-header">
-                    <img 
-                      src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face'} 
-                      alt={userProfile.name}
-                    />
-                    <input
-                      type="text"
-                      placeholder="شارك خبراً جديداً..."
-                      value={newNewsContent}
-                      onChange={(e) => setNewNewsContent(e.target.value)}
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter' && newNewsContent.trim()) {
-                          createNews(newNewsContent);
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="post-actions">
-                    <button className="post-action">
-                      <Image size={20} />
-                      <span>صورة</span>
-                    </button>
-                    <button className="post-action">
-                      <Video size={20} />
-                      <span>فيديو</span>
-                    </button>
-                    <button 
-                      className="post-btn"
-                      onClick={() => createNews(newNewsContent)}
-                      disabled={!newNewsContent.trim()}
-                    >
-                      نشر الخبر
-                    </button>
-                  </div>
-                </div>
-
-                {/* عرض الأخبار */}
-                <div className="news-container">
-                  {userNews.length === 0 ? (
-                    <div className="empty-state">
-                      <div className="empty-icon">
-                        <FileText size={64} />
-                      </div>
-                      <h3>لا توجد أخبار بعد</h3>
-                      <p>ابدأ بمشاركة أول خبر لك!</p>
-                    </div>
-                  ) : (
-                    (userNews || []).map(news => (
-                      <React.Fragment key={news.id}>
-                        <div className="news-post">
-                          <div className="news-post-header">
-                            <div className="author-info">
-                              <img src={news.author_avatar} alt={news.author_name} />
-                              <div>
-                                <h4>{news.author_name}</h4>
-                                <span className="post-time">{new Date(news.created_at).toLocaleString("ar-SA", { dateStyle: "medium", timeStyle: "short" })}</span>
-                              </div>
-                            </div>
-                            <button className="post-menu">
-                              <MoreHorizontal size={20} />
-                            </button>
-                          </div>
-                          
-                          <div className="post-content">
-                            <p>{news.content}</p>
-                            {news.image_url && (
-                              <img src={news.image_url} alt="خبر" className="post-image" />
-                            )}
-                          </div>
-                          
-                          <div className="post-stats">
-                            <span>{news.likes} إعجاب</span>
-                            <span>{news.comments} تعليق</span>
-                            <span>{news.shares} مشاركة</span>
-                          </div>
-                          
-                          <div className="post-actions">
-                            <button className="action-btn">
-                              <Heart size={20} />
-                              <span>إعجاب</span>
-                            </button>
-                            <button className="action-btn">
-                              <MessageSquare size={20} />
-                              <span>تعليق</span>
-                            </button>
-                            <button className="action-btn">
-                              <Share2 size={20} />
-                              <span>مشاركة</span>
-                            </button>
-                          </div>
-                        </div>
-                      </React.Fragment>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeProfileTab === 'reels' && (
-            <div className="reels-section">
-              {/* نموذج إنشاء ريل */}
-              <div className="create-reel">
-                <div className="post-header">
-                  <img 
-                    src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face'} 
-                    alt={userProfile.name}
-                  />
-                  <input
-                    type="text"
-                    placeholder="شارك ريلاً جديداً..."
-                    value={newReelContent}
-                    onChange={(e) => setNewReelContent(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter' && newReelContent.trim()) {
-                        createReel(newReelContent);
-                      }
-                    }}
-                  />
-                </div>
-                <div className="post-actions">
-                  <button className="post-action">
-                    <Video size={20} />
-                    <span>فيديو</span>
-                  </button>
-                  <button 
-                    className="post-btn"
-                    onClick={() => createReel(newReelContent)}
-                    disabled={!newReelContent.trim()}
-                  >
-                    نشر الريل
-                  </button>
-                </div>
-              </div>
-
-              {/* عرض الريلز */}
-              <div className="reels-container">
-                {userReels.length === 0 ? (
-                  <div className="empty-state">
-                    <Play size={48} />
-                    <h3>لا توجد ريلز بعد</h3>
-                    <p>ابدأ بإنشاء أول ريل لك!</p>
-                  </div>
-                ) : (
-                  <div className="reels-grid">
-                    {userReels.map(reel => (
-                      <div key={reel.id} className="reel-card">
-                        <div className="reel-preview">
-                          <Play size={24} className="play-icon" />
-                          <div className="reel-overlay">
-                            <div className="reel-info">
-                              <span className="reel-views">{reel.views} مشاهدة</span>
-                              <span className="reel-time">{reel.timestamp}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="reel-content">
-                          <p>{reel.content}</p>
-                        </div>
-                        <div className="reel-actions">
-                          <button className="reel-action-btn">
-                            <Heart size={16} />
-                            <span>{reel.likes}</span>
-                          </button>
-                          <button className="reel-action-btn">
-                            <MessageSquare size={16} />
-                            <span>{reel.comments}</span>
-                          </button>
-                          <button className="reel-action-btn">
-                            <Share2 size={16} />
-                            <span>مشاركة</span>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeSection === 'friends' && (
-            <div className="friends-section">
-              <h2>الأصدقاء</h2>
-              <div className="friends-grid">
-                {[
-                  { name: 'أحمد محمد', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face', mutualFriends: 12 },
-                  { name: 'فاطمة العلي', avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face', mutualFriends: 8 },
-                  { name: 'محمد السعيد', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face', mutualFriends: 15 },
-                  { name: 'نورا أحمد', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&h=150&fit=crop&crop=face', mutualFriends: 6 },
-                  { name: 'عبدالله خالد', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop&crop=face', mutualFriends: 9 },
-                  { name: 'سارة محمود', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&h=150&fit=crop&crop=face', mutualFriends: 11 }
-                ].map((friend, index) => (
-                  <div key={index} className="friend-card">
-                    <img src={friend.avatar} alt={friend.name} />
-                    <h4>{friend.name}</h4>
-                    <p>{friend.mutualFriends} صديق مشترك</p>
-                    <button className="friend-btn">إرسال رسالة</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {(activeSection === 'pages' || activeSection === 'groups' || activeSection === 'reels') && (
-            <div className="coming-soon">
-              <h2>قريباً...</h2>
-              <p>هذا القسم قيد التطوير وسيكون متاحاً قريباً!</p>
-            </div>
-          )}
-        </main>
+        {/* المحتوى المركزي */}
+        {renderContent()}
 
         {/* الشريط الجانبي الأيمن */}
         <aside className="sidebar right-sidebar">
           <div className="trending-section">
-            <h3>الترندات</h3>
+            <h3>الأكثر رواجاً</h3>
             <div className="trending-item">
               <TrendingUp size={16} />
-              <span>#فلسطين_حرة</span>
+              <span>#تقنية</span>
             </div>
             <div className="trending-item">
               <TrendingUp size={16} />
-              <span>#الذكاء_الاصطناعي</span>
+              <span>#رياضة</span>
             </div>
             <div className="trending-item">
               <TrendingUp size={16} />
-              <span>#ريادة_الأعمال</span>
+              <span>#أخبار</span>
             </div>
           </div>
 
           <div className="suggestions-section">
-            <h3>اقتراحات لك</h3>
+            <h3>اقتراحات المتابعة</h3>
             <div className="suggestion-item">
-              <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face" alt="صلاح" />
+              <img src="https://images.unsplash.com/photo-1494790108755-2616b612b786?w=40&h=40&fit=crop&crop=face" alt="مقترح" />
               <div>
-                <span>صلاح الدين</span>
+                <span>نورا أحمد</span>
                 <button className="follow-btn">متابعة</button>
               </div>
             </div>
             <div className="suggestion-item">
-              <img src="https://images.unsplash.com/photo-1494790108755-2616b612b786?w=40&h=40&fit=crop&crop=face" alt="ليلى" />
+              <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="مقترح" />
               <div>
-                <span>ليلى أحمد</span>
+                <span>خالد محمد</span>
                 <button className="follow-btn">متابعة</button>
               </div>
             </div>
@@ -1044,35 +1154,35 @@ function App() {
 
       {/* شريط التنقل السفلي للهواتف */}
       <nav className="mobile-nav">
-        <div 
+        <div
           className={`mobile-nav-item ${activeSection === 'home' ? 'active' : ''}`}
           onClick={() => setActiveSection('home')}
         >
           <Home size={22} />
           <span>الرئيسية</span>
         </div>
-        <div 
+        <div
           className={`mobile-nav-item ${activeSection === 'friends' ? 'active' : ''}`}
           onClick={() => setActiveSection('friends')}
         >
           <Users size={22} />
           <span>الأصدقاء</span>
         </div>
-        <div 
-          className={`mobile-nav-item ${activeSection === 'reels' ? 'active' : ''}`}
-          onClick={() => setActiveSection('reels')}
-        >
-          <Play size={22} />
-          <span>الريلز</span>
-        </div>
-        <div 
+        <div
           className={`mobile-nav-item ${activeSection === 'groups' ? 'active' : ''}`}
           onClick={() => setActiveSection('groups')}
         >
           <Users2 size={22} />
           <span>المجموعات</span>
         </div>
-        <div 
+        <div
+          className={`mobile-nav-item ${activeSection === 'reels' ? 'active' : ''}`}
+          onClick={() => setActiveSection('reels')}
+        >
+          <Play size={22} />
+          <span>ريلز</span>
+        </div>
+        <div
           className={`mobile-nav-item ${activeSection === 'profile' ? 'active' : ''}`}
           onClick={() => setActiveSection('profile')}
         >
@@ -1081,33 +1191,28 @@ function App() {
         </div>
       </nav>
 
-      {/* نافذة رفع الصور */}
+      {/* النوافذ المنبثقة */}
       {showImageUpload && (
         <ImageUpload
-          user={user}
           type={imageUploadType}
-          currentImage={imageUploadType === 'avatar' ? userProfile.avatar : userProfile.cover}
           onImageUpdate={handleImageUpdate}
           onClose={() => setShowImageUpload(false)}
         />
       )}
 
-      {/* نافذة إعداد الملف الشخصي */}
       {showProfileSetup && (
         <ProfileSetup
-          user={user}
-          onProfileSetupComplete={handleProfileSetupComplete}
+          onComplete={handleProfileSetupComplete}
           onSkip={handleProfileSetupSkip}
         />
       )}
 
-      {/* نافذة تعديل الملف الشخصي */}
       {showEditProfile && (
         <EditProfile
           user={user}
           userProfile={userProfile}
-          onClose={() => setShowEditProfile(false)}
           onSave={handleEditProfileSave}
+          onClose={() => setShowEditProfile(false)}
         />
       )}
     </div>
@@ -1115,4 +1220,3 @@ function App() {
 }
 
 export default App;
-
