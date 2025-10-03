@@ -5,14 +5,14 @@ import ImageUpload from './components/ImageUpload';
 import ProfileSetup from './components/ProfileSetup';
 import EditProfile from './components/EditProfile';
 import './App.css';
-import { 
-  Home, 
-  Users, 
-  FileText, 
-  Users2, 
-  User, 
-  Calendar, 
-  TrendingUp, 
+import {
+  Home,
+  Users,
+  FileText,
+  Users2,
+  User,
+  Calendar,
+  TrendingUp,
   BookOpen,
   Search,
   Bell,
@@ -40,7 +40,6 @@ import {
 } from 'lucide-react';
 
 function App() {
-  // حالة المصادقة
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('home');
@@ -56,6 +55,11 @@ function App() {
   const [showProfileSetup, setShowProfileSetup] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [profileCompleted, setProfileCompleted] = useState(false);
+  const [activeProfileTab, setActiveProfileTab] = useState('news');
+  const [userNews, setUserNews] = useState([]);
+  const [userReels, setUserReels] = useState([]);
+  const [newNewsContent, setNewNewsContent] = useState('');
+  const [newReelContent, setNewReelContent] = useState('');
   const [userProfile, setUserProfile] = useState({
     name: '',
     email: '',
@@ -73,21 +77,13 @@ function App() {
   });
 
   useEffect(() => {
-    // فحص المستخدم الحالي
     const getUser = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        console.log('Current user:', user); // للتشخيص
         if (user) {
           setUser(user);
-          setUserProfile(prev => ({
-            ...prev,
-            name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'مستخدم',
-            email: user.email
-          }));
           checkProfileCompletion(user);
         } else {
-          // إذا لم يكن هناك مستخدم، تأكد من إزالة أي بيانات محفوظة
           localStorage.removeItem('profile_setup_completed');
           setUser(null);
         }
@@ -102,18 +98,12 @@ function App() {
     getUser();
     loadPosts();
 
-    // الاستماع لتغييرات المصادقة
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         const currentUser = session?.user ?? null;
         setUser(currentUser);
         
         if (currentUser) {
-          setUserProfile(prev => ({
-            ...prev,
-            name: currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || 'مستخدم',
-            email: currentUser.email
-          }));
           checkProfileCompletion(currentUser);
         }
         
@@ -124,11 +114,23 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (user) {
+      loadUserNews(user.id);
+    }
+
+    const path = window.location.pathname;
+    if (path === '/profile') {
+      setActiveSection('profile');
+    } else if (path === '/home') {
+      setActiveSection('home');
+    }
+  }, [user]);
+
   const checkProfileCompletion = async (currentUser) => {
     if (!currentUser) return;
     
     try {
-      // جلب بيانات الملف الشخصي من Supabase
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('*')
@@ -141,7 +143,6 @@ function App() {
       }
 
       if (profile) {
-        // تحديث بيانات الملف الشخصي
         setUserProfile(prev => ({
           ...prev,
           name: profile.full_name || currentUser.email?.split('@')[0] || 'مستخدم',
@@ -155,31 +156,20 @@ function App() {
           joinDate: new Date(profile.created_at).toLocaleDateString('ar-SA')
         }));
 
-        // جلب البيانات الإضافية من localStorage مؤقتاً
-        const additionalData = localStorage.getItem(`profile_additional_${currentUser.id}`);
-        if (additionalData) {
-          const additional = JSON.parse(additionalData);
-          setUserProfile(prev => ({ ...prev, ...additional }));
-        }
-
-        // فحص إذا كان الملف الشخصي مكتملاً
         const isCompleted = localStorage.getItem('profile_setup_completed');
         if (isCompleted === 'true') {
           setProfileCompleted(true);
           setShowProfileSetup(false);
         } else if (profile.birth_date && profile.gender) {
-          // إذا كانت البيانات الأساسية موجودة، اعتبر الملف مكتملاً
           localStorage.setItem('profile_setup_completed', 'true');
           setProfileCompleted(true);
           setShowProfileSetup(false);
         } else {
-          // عرض نافذة إكمال الملف الشخصي
           setTimeout(() => {
             setShowProfileSetup(true);
           }, 1000);
         }
       } else {
-        // إذا لم يكن هناك ملف شخصي، عرض نافذة الإعداد
         setTimeout(() => {
           setShowProfileSetup(true);
         }, 1000);
@@ -189,8 +179,26 @@ function App() {
     }
   };
 
+  const loadUserNews = async (userId) => {
+    if (!userId) return;
+    try {
+      const { data, error } = await supabase
+        .from("news_posts")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error("Error loading user news:", error);
+        return;
+      }
+      setUserNews(data);
+    } catch (error) {
+      console.error("Error loading user news:", error);
+    }
+  };
+
   const loadPosts = () => {
-    // بيانات تجريبية للمنشورات
     const samplePosts = [
       {
         id: 1,
@@ -277,39 +285,95 @@ function App() {
     }
   };
 
+  const createNews = async (content) => {
+    if (!content.trim() || !user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("news_posts")
+        .insert({
+          user_id: user.id,
+          author_name: userProfile.name,
+          author_avatar: userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+          content: content.trim(),
+        })
+        .select();
+
+      if (error) {
+        console.error("Error creating news post:", error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setUserNews(prevNews => [data[0], ...prevNews]);
+        setNewNewsContent('');
+      }
+    } catch (error) {
+      console.error('Error creating news:', error);
+    }
+  };
+
+  const createReel = async (content) => {
+    if (!content.trim() || !user) return;
+
+    try {
+      const newReel = {
+        id: Date.now(),
+        author: userProfile.name,
+        avatar: userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+        content: content.trim(),
+        timestamp: 'الآن',
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        views: 0
+      };
+
+      setUserReels(prevReels => [newReel, ...prevReels]);
+      setNewReelContent('');
+    } catch (error) {
+      console.error('Error creating reel:', error);
+    }
+  };
+
   const handleImageUpload = (type) => {
     setImageUploadType(type);
     setShowImageUpload(true);
   };
 
-  const handleImageUpdate = (imageUrl) => {
-    if (imageUploadType === 'avatar') {
-      setUserProfile(prev => ({ ...prev, avatar: imageUrl }));
-    } else if (imageUploadType === 'cover') {
-      setUserProfile(prev => ({ ...prev, cover: imageUrl }));
-    }
-    
-    // حفظ في التخزين المحلي
-    if (user) {
-      const updatedProfile = { ...userProfile };
+  const handleImageUpdate = async (imageUrl) => {
+    if (!user) return;
+
+    try {
+      let updateData = {};
       if (imageUploadType === 'avatar') {
-        updatedProfile.avatar = imageUrl;
+        updateData = { avatar_url: imageUrl };
+        setUserProfile(prev => ({ ...prev, avatar: imageUrl }));
       } else if (imageUploadType === 'cover') {
-        updatedProfile.cover = imageUrl;
+        updateData = { cover_url: imageUrl };
+        setUserProfile(prev => ({ ...prev, cover: imageUrl }));
       }
-      localStorage.setItem(`profile_${user.id}`, JSON.stringify(updatedProfile));
+
+      const { error } = await supabase
+        .from('profiles')
+        .update(updateData)
+        .eq('id', user.id);
+
+      if (error) {
+        throw error;
+      }
+      setShowImageUpload(false);
+    } catch (error) {
+      console.error('Error updating image:', error);
+      // Optionally, revert UI change or show error message
     }
-    
-    setShowImageUpload(false);
   };
 
   const handleProfileSetupComplete = (profileData) => {
     const updatedProfile = { ...userProfile, ...profileData };
     setUserProfile(updatedProfile);
     
-    // حفظ في التخزين المحلي
     if (user) {
-      localStorage.setItem(`profile_${user.id}`, JSON.stringify(updatedProfile));
       localStorage.setItem('profile_setup_completed', 'true');
     }
     
@@ -349,7 +413,6 @@ function App() {
 
   return (
     <div className="app" onClick={closeAllDropdowns}>
-      {/* الشريط العلوي */}
       <header className="header">
         <div className="header-content">
           <div className="header-left">
@@ -362,7 +425,7 @@ function App() {
             </div>
           </div>
           
-<div className="header-right">
+          <div className="header-right">
             <div className="header-icons">
               <div className="icon-wrapper" onClick={(e) => {
                 e.stopPropagation();
@@ -417,7 +480,7 @@ function App() {
                       <small>منذ ساعة</small>
                     </div>
                     <div className="notification-item">
-                      <span>انضم محمد إلى مجموعتك</span>
+                      <span>تابعك محمد</span>
                       <small>منذ ساعتين</small>
                     </div>
                   </div>
@@ -427,147 +490,97 @@ function App() {
               <div className="icon-wrapper" onClick={(e) => {
                 e.stopPropagation();
                 setShowSettings(!showSettings);
-                setShowNotifications(false);
                 setShowMessages(false);
+                setShowNotifications(false);
               }}>
                 <Settings size={24} />
                 {showSettings && (
                   <div className="dropdown settings-dropdown">
                     <h3>الإعدادات</h3>
-                    <div className="setting-item" onClick={() => setActiveSection('profile')}>
-                      <User size={16} />
-                      <span>الملف الشخصي</span>
+                    <div className="setting-item">
+                      <Shield size={20} />
+                      <span>الخصوصية والأمان</span>
                     </div>
                     <div className="setting-item">
-                      <Shield size={16} />
-                      <span>الخصوصية</span>
+                      <Volume2 size={20} />
+                      <span>الإشعارات والأصوات</span>
                     </div>
                     <div className="setting-item">
-                      <Bell size={16} />
-                      <span>الإشعارات</span>
+                      <Globe size={20} />
+                      <span>اللغة</span>
                     </div>
                     <div className="setting-item" onClick={handleLogout}>
-                      <LogOut size={16} />
+                      <LogOut size={20} />
                       <span>تسجيل الخروج</span>
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div className="profile-menu" onClick={(e) => {
+                e.stopPropagation();
+                setActiveSection('profile');
+                closeAllDropdowns();
+              }}>
+                <img 
+                  src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face'} 
+                  alt={userProfile.name}
+                />
               </div>
             </div>
           </div>
         </div>
       </header>
 
-      {/* المحتوى الرئيسي */}
-      <div className="main-layout">
+      <div className="main-content">
         {/* الشريط الجانبي الأيسر */}
         <aside className="sidebar left-sidebar">
-          <nav className="nav-menu">
-            <div 
-              className={`nav-item ${activeSection === 'home' ? 'active' : ''}`}
-              onClick={() => setActiveSection('home')}
-            >
-              <Home size={20} />
-              <span>الرئيسية</span>
-            </div>
-            <div 
-              className={`nav-item ${activeSection === 'friends' ? 'active' : ''}`}
-              onClick={() => setActiveSection('friends')}
-            >
-              <Users size={20} />
-              <span>الأصدقاء</span>
-            </div>
-            <div 
-              className={`nav-item ${activeSection === 'pages' ? 'active' : ''}`}
-              onClick={() => setActiveSection('pages')}
-            >
-              <FileText size={20} />
-              <span>الصفحات</span>
-            </div>
-            <div 
-              className={`nav-item ${activeSection === 'groups' ? 'active' : ''}`}
-              onClick={() => setActiveSection('groups')}
-            >
-              <Users2 size={20} />
-              <span>المجموعات</span>
-            </div>
-            <div 
-              className={`nav-item ${activeSection === 'profile' ? 'active' : ''}`}
-              onClick={() => setActiveSection('profile')}
-            >
-              <User size={20} />
-              <span>الملف الشخصي</span>
-            </div>
-            <div 
-              className={`nav-item ${activeSection === 'reels' ? 'active' : ''}`}
-              onClick={() => setActiveSection('reels')}
-            >
-              <Play size={20} />
-              <span>الريلز</span>
-            </div>
-          </nav>
-        </aside>
-
-        {/* شريط التنقل السفلي للجوال */}
-        <div className="bottom-nav">
-          <div 
-            className={`bottom-nav-item ${activeSection === 'home' ? 'active' : ''}`}
-            onClick={() => setActiveSection('home')}
-          >
+          <div className="sidebar-item" onClick={() => setActiveSection('profile')}>
+            <img 
+              src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face'} 
+              alt={userProfile.name}
+            />
+            <span>{userProfile.name}</span>
+          </div>
+          <div className="sidebar-item" onClick={() => setActiveSection('home')}>
             <Home size={20} />
             <span>الرئيسية</span>
           </div>
-          <div 
-            className={`bottom-nav-item ${activeSection === 'friends' ? 'active' : ''}`}
-            onClick={() => setActiveSection('friends')}
-          >
+          <div className="sidebar-item" onClick={() => setActiveSection('friends')}>
             <Users size={20} />
             <span>الأصدقاء</span>
           </div>
-          <div 
-            className={`bottom-nav-item ${activeSection === 'profile' ? 'active' : ''}`}
-            onClick={() => setActiveSection('profile')}
-          >
-            <User size={20} />
-            <span>الملف الشخصي</span>
+          <div className="sidebar-item" onClick={() => setActiveSection('news')}>
+            <FileText size={20} />
+            <span>الأخبار</span>
           </div>
-          <div 
-            className={`bottom-nav-item ${activeSection === 'notifications' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveSection('notifications');
-              setShowNotifications(true);
-              setShowMessages(false);
-              setShowSettings(false);
-            }}
-          >
-            <Bell size={20} />
-            {unreadNotifications > 0 && (
-              <span className="notification-badge">{unreadNotifications}</span>
-            )}
-            <span>الإشعارات</span>
+          <div className="sidebar-item" onClick={() => setActiveSection('reels')}>
+            <Play size={20} />
+            <span>الريلز</span>
           </div>
-          <div 
-            className={`bottom-nav-item ${activeSection === 'messages' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveSection('messages');
-              setShowMessages(true);
-              setShowNotifications(false);
-              setShowSettings(false);
-            }}
-          >
-            <MessageCircle size={20} />
-            {unreadMessages > 0 && (
-              <span className="notification-badge">{unreadMessages}</span>
-            )}
-            <span>الرسائل</span>
+          <div className="sidebar-item" onClick={() => setActiveSection('groups')}>
+            <Users2 size={20} />
+            <span>المجموعات</span>
           </div>
-        </div>
+          <div className="sidebar-item" onClick={() => setActiveSection('pages')}>
+            <BookOpen size={20} />
+            <span>الصفحات</span>
+          </div>
+          <div className="sidebar-item" onClick={() => setActiveSection('events')}>
+            <Calendar size={20} />
+            <span>المناسبات</span>
+          </div>
+          <div className="sidebar-item" onClick={() => setActiveSection('trending')}>
+            <TrendingUp size={20} />
+            <span>المواضيع الرائجة</span>
+          </div>
+        </aside>
 
-        {/* المحتوى المركزي */}
-        <main className="main-content">
+        {/* المحتوى الرئيسي */}
+        <main className="center-content">
           {activeSection === 'home' && (
             <div className="home-section">
-              {/* نموذج إنشاء منشور */}
+              {/* إنشاء منشور */}
               <div className="create-post">
                 <div className="post-header">
                   <img 
@@ -576,7 +589,7 @@ function App() {
                   />
                   <input
                     type="text"
-                    placeholder={`ما الذي تفكر فيه، ${userProfile.name}؟`}
+                    placeholder="بماذا تفكر يا {userProfile.name}؟"
                     value={newPostContent}
                     onChange={(e) => setNewPostContent(e.target.value)}
                     onKeyPress={(e) => {
@@ -745,49 +758,21 @@ function App() {
                     </div>
                   )}
                   
-                  {userProfile.workplace && (
-                    <div className="about-item">
-                      <Briefcase size={16} />
-                      <span>يعمل في {userProfile.workplace}</span>
-                    </div>
-                  )}
-                  
-                  {userProfile.work && (
-                    <div className="about-item">
-                      <Briefcase size={16} />
-                      <span>المسمى الوظيفي: {userProfile.work}</span>
-                    </div>
-                  )}
-                  
-                  {userProfile.education && (
-                    <div className="about-item">
-                      <GraduationCap size={16} />
-                      <span>درس في {userProfile.education}</span>
-                    </div>
-                  )}
-                  
-                  {userProfile.relationship_status && (
+                  {userProfile.maritalStatus && (
                     <div className="about-item">
                       <Heart size={16} />
-                      <span>الحالة الاجتماعية: {
-                        userProfile.relationship_status === 'single' ? 'أعزب' :
-                        userProfile.relationship_status === 'married' ? 'متزوج' :
-                        userProfile.relationship_status === 'engaged' ? 'مخطوب' :
-                        userProfile.relationship_status === 'divorced' ? 'مطلق' :
-                        userProfile.relationship_status === 'widowed' ? 'أرمل' :
-                        userProfile.relationship_status === 'complicated' ? 'معقدة' :
-                        userProfile.relationship_status
-                      }</span>
+                      <span>الحالة الاجتماعية: {userProfile.maritalStatus}</span>
                     </div>
                   )}
                   
-                  {userProfile.website && (
-                    <div className="about-item">
-                      <Globe size={16} />
-                      <a href={userProfile.website} target="_blank" rel="noopener noreferrer">{userProfile.website}</a>
-                    </div>
-                  )}
-                  
+                  <div className="about-item">
+                    <Briefcase size={16} />
+                    <span>يعمل في شركة سام شات</span>
+                  </div>
+                  <div className="about-item">
+                    <GraduationCap size={16} />
+                    <span>درس في جامعة سام شات</span>
+                  </div>
                   <div className="about-item">
                     <Calendar size={16} />
                     <span>انضم في {userProfile.joinDate}</span>
@@ -795,33 +780,195 @@ function App() {
                 </div>
               </div>
 
-              {/* منشورات المستخدم */}
-              <div className="user-posts">
-                <h3>المنشورات</h3>
-                {posts.filter(post => post.author === userProfile.name).map(post => (
-                  <div key={post.id} className="post">
-                    <div className="post-header">
-                      <img src={post.avatar} alt={post.author} />
-                      <div className="post-info">
-                        <h4>{post.author}</h4>
-                        <span className="post-time">{post.timestamp}</span>
-                      </div>
-                    </div>
-                    
-                    <div className="post-content">
-                      <p>{post.content}</p>
-                      {post.image && (
-                        <img src={post.image} alt="منشور" className="post-image" />
-                      )}
-                    </div>
-                    
-                    <div className="post-stats">
-                      <span>{post.likes} إعجاب</span>
-                      <span>{post.comments} تعليق</span>
-                      <span>{post.shares} مشاركة</span>
-                    </div>
+              {/* قسم الأخبار */}
+              <div className="news-feed-section">
+                <div className="section-header">
+                  <h3>آخر الأخبار</h3>
+                  <button className="create-news-btn">
+                    <Plus size={16} />
+                    إنشاء خبر جديد
+                  </button>
+                </div>
+
+                {/* إنشاء خبر */}
+                <div className="create-news">
+                  <div className="post-header">
+                    <img 
+                      src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face'} 
+                      alt={userProfile.name}
+                    />
+                    <input
+                      type="text"
+                      placeholder="شارك خبراً جديداً..."
+                      value={newNewsContent}
+                      onChange={(e) => setNewNewsContent(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && newNewsContent.trim()) {
+                          createNews(newNewsContent);
+                        }
+                      }}
+                    />
                   </div>
-                ))}
+                  <div className="post-actions">
+                    <button className="post-action">
+                      <Image size={20} />
+                      <span>صورة</span>
+                    </button>
+                    <button className="post-action">
+                      <Video size={20} />
+                      <span>فيديو</span>
+                    </button>
+                    <button 
+                      className="post-btn"
+                      onClick={() => createNews(newNewsContent)}
+                      disabled={!newNewsContent.trim()}
+                    >
+                      نشر الخبر
+                    </button>
+                  </div>
+                </div>
+
+                {/* عرض الأخبار */}
+                <div className="news-container">
+                  {userNews.length === 0 ? (
+                    <div className="empty-state">
+                      <div className="empty-icon">
+                        <FileText size={64} />
+                      </div>
+                      <h3>لا توجد أخبار بعد</h3>
+                      <p>ابدأ بمشاركة أول خبر لك!</p>
+                    </div>
+                  ) : (
+                    (userNews || []).map(news => (
+                      <React.Fragment key={news.id}>
+                        <div className="news-post">
+                          <div className="news-post-header">
+                            <div className="author-info">
+                              <img src={news.author_avatar} alt={news.author_name} />
+                              <div>
+                                <h4>{news.author_name}</h4>
+                                <span className="post-time">{new Date(news.created_at).toLocaleString("ar-SA", { dateStyle: "medium", timeStyle: "short" })}</span>
+                              </div>
+                            </div>
+                            <button className="post-menu">
+                              <MoreHorizontal size={20} />
+                            </button>
+                          </div>
+                          
+                          <div className="post-content">
+                            <p>{news.content}</p>
+                            {news.image_url && (
+                              <img src={news.image_url} alt="خبر" className="post-image" />
+                            )}
+                          </div>
+                          
+                          <div className="post-stats">
+                            <span>{news.likes} إعجاب</span>
+                            <span>{news.comments} تعليق</span>
+                            <span>{news.shares} مشاركة</span>
+                          </div>
+                          
+                          <div className="post-actions">
+                            <button className="action-btn">
+                              <Heart size={20} />
+                              <span>إعجاب</span>
+                            </button>
+                            <button className="action-btn">
+                              <MessageSquare size={20} />
+                              <span>تعليق</span>
+                            </button>
+                            <button className="action-btn">
+                              <Share2 size={20} />
+                              <span>مشاركة</span>
+                            </button>
+                          </div>
+                        </div>
+                      </React.Fragment>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeProfileTab === 'reels' && (
+            <div className="reels-section">
+              {/* نموذج إنشاء ريل */}
+              <div className="create-reel">
+                <div className="post-header">
+                  <img 
+                    src={userProfile.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face'} 
+                    alt={userProfile.name}
+                  />
+                  <input
+                    type="text"
+                    placeholder="شارك ريلاً جديداً..."
+                    value={newReelContent}
+                    onChange={(e) => setNewReelContent(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && newReelContent.trim()) {
+                        createReel(newReelContent);
+                      }
+                    }}
+                  />
+                </div>
+                <div className="post-actions">
+                  <button className="post-action">
+                    <Video size={20} />
+                    <span>فيديو</span>
+                  </button>
+                  <button 
+                    className="post-btn"
+                    onClick={() => createReel(newReelContent)}
+                    disabled={!newReelContent.trim()}
+                  >
+                    نشر الريل
+                  </button>
+                </div>
+              </div>
+
+              {/* عرض الريلز */}
+              <div className="reels-container">
+                {userReels.length === 0 ? (
+                  <div className="empty-state">
+                    <Play size={48} />
+                    <h3>لا توجد ريلز بعد</h3>
+                    <p>ابدأ بإنشاء أول ريل لك!</p>
+                  </div>
+                ) : (
+                  <div className="reels-grid">
+                    {userReels.map(reel => (
+                      <div key={reel.id} className="reel-card">
+                        <div className="reel-preview">
+                          <Play size={24} className="play-icon" />
+                          <div className="reel-overlay">
+                            <div className="reel-info">
+                              <span className="reel-views">{reel.views} مشاهدة</span>
+                              <span className="reel-time">{reel.timestamp}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="reel-content">
+                          <p>{reel.content}</p>
+                        </div>
+                        <div className="reel-actions">
+                          <button className="reel-action-btn">
+                            <Heart size={16} />
+                            <span>{reel.likes}</span>
+                          </button>
+                          <button className="reel-action-btn">
+                            <MessageSquare size={16} />
+                            <span>{reel.comments}</span>
+                          </button>
+                          <button className="reel-action-btn">
+                            <Share2 size={16} />
+                            <span>مشاركة</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -863,34 +1010,33 @@ function App() {
             <h3>الترندات</h3>
             <div className="trending-item">
               <TrendingUp size={16} />
-              <span>#سام_شات</span>
+              <span>#فلسطين_حرة</span>
             </div>
             <div className="trending-item">
               <TrendingUp size={16} />
-              <span>#التقنية</span>
+              <span>#الذكاء_الاصطناعي</span>
             </div>
             <div className="trending-item">
               <TrendingUp size={16} />
-              <span>#السعودية</span>
+              <span>#ريادة_الأعمال</span>
             </div>
           </div>
 
-          <div className="online-friends">
-            <h3>الأصدقاء المتصلون</h3>
-            <div className="online-friend">
-              <img src="https://images.unsplash.com/photo-1494790108755-2616b612b786?w=40&h=40&fit=crop&crop=face" alt="فاطمة" />
-              <span>فاطمة العلي</span>
-              <div className="online-indicator"></div>
+          <div className="suggestions-section">
+            <h3>اقتراحات لك</h3>
+            <div className="suggestion-item">
+              <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop&crop=face" alt="صلاح" />
+              <div>
+                <span>صلاح الدين</span>
+                <button className="follow-btn">متابعة</button>
+              </div>
             </div>
-            <div className="online-friend">
-              <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop&crop=face" alt="محمد" />
-              <span>محمد السعيد</span>
-              <div className="online-indicator"></div>
-            </div>
-            <div className="online-friend">
-              <img src="https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=40&h=40&fit=crop&crop=face" alt="نورا" />
-              <span>نورا أحمد</span>
-              <div className="online-indicator"></div>
+            <div className="suggestion-item">
+              <img src="https://images.unsplash.com/photo-1494790108755-2616b612b786?w=40&h=40&fit=crop&crop=face" alt="ليلى" />
+              <div>
+                <span>ليلى أحمد</span>
+                <button className="follow-btn">متابعة</button>
+              </div>
             </div>
           </div>
         </aside>
@@ -938,8 +1084,10 @@ function App() {
       {/* نافذة رفع الصور */}
       {showImageUpload && (
         <ImageUpload
+          user={user}
           type={imageUploadType}
-          onUpload={handleImageUpdate}
+          currentImage={imageUploadType === 'avatar' ? userProfile.avatar : userProfile.cover}
+          onImageUpdate={handleImageUpdate}
           onClose={() => setShowImageUpload(false)}
         />
       )}
@@ -948,7 +1096,7 @@ function App() {
       {showProfileSetup && (
         <ProfileSetup
           user={user}
-          onComplete={handleProfileSetupComplete}
+          onProfileSetupComplete={handleProfileSetupComplete}
           onSkip={handleProfileSetupSkip}
         />
       )}
@@ -967,3 +1115,4 @@ function App() {
 }
 
 export default App;
+

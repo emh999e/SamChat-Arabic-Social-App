@@ -1,102 +1,100 @@
-import React, { useState, useRef } from 'react';
-import { Camera, Upload, X, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
+import { X, UploadCloud } from 'lucide-react';
+import './ImageUpload.css';
 
-const ImageUpload = ({ user, type = 'avatar', currentImage, onImageUpdate, onClose }) => {
+function ImageUpload({ user, type, currentImage, onImageUpdate, onClose }) {
   const [uploading, setUploading] = useState(false);
-  const [preview, setPreview] = useState(null);
-  const [error, setError] = useState('');
-  const fileInputRef = useRef(null);
+  const [imageUrl, setImageUrl] = useState(currentImage);
+  const [error, setError] = useState(null);
 
-  const handleFileSelect = (event) => {
+  useEffect(() => {
+    setImageUrl(currentImage);
+  }, [currentImage]);
+
+  const uploadImage = async (event) => {
+    if (!user) {
+      setError('يجب تسجيل الدخول لرفع الصور.');
+      return;
+    }
+
     const file = event.target.files[0];
     if (!file) return;
 
-    // التحقق من نوع الملف
-    if (!file.type.startsWith('image/')) {
-      setError('يرجى اختيار ملف صورة صالح');
-      return;
-    }
-
-    // التحقق من حجم الملف (5MB max)
-    if (file.size > 5 * 1024 * 1024) {
-      setError('حجم الصورة يجب أن يكون أقل من 5 ميجابايت');
-      return;
-    }
-
-    setError('');
-    
-    // إنشاء معاينة للصورة
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setPreview(e.target.result);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const uploadImage = async () => {
-    const file = fileInputRef.current?.files[0];
-    if (!file) return;
-
     setUploading(true);
-    setError('');
+    setError(null);
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${type}-${user.id}-${Math.random()}.${fileExt}`;
+    const filePath = `${user.id}/${fileName}`;
 
     try {
-      // تحويل الصورة إلى base64 وحفظها في localStorage
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const imageDataUrl = e.target.result;
-        
-        // حفظ الصورة في localStorage
-        const storageKey = type === 'avatar' ? 'userProfileImage' : 'userCoverImage';
-        localStorage.setItem(storageKey, imageDataUrl);
-        
-        // تحديث الملف الشخصي في localStorage
-        const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-        const updateField = type === 'avatar' ? 'avatar_url' : 'cover_url';
-        userProfile[updateField] = imageDataUrl;
-        localStorage.setItem('userProfile', JSON.stringify(userProfile));
-        
-        // إشعار المكون الأب بالتحديث
-        onImageUpdate(imageDataUrl);
-        onClose();
-        setUploading(false);
-      };
-      
-      reader.onerror = () => {
-        setError('حدث خطأ أثناء معالجة الصورة');
-        setUploading(false);
-      };
-      
-      reader.readAsDataURL(file);
+      // Upload image to Supabase storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars') // Using 'avatars' bucket for both avatar and cover for simplicity
+        .upload(filePath, file, { cacheControl: '3600', upsert: false });
 
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: publicUrlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      const publicUrl = publicUrlData.publicUrl;
+
+      // Update user profile in database
+      const updateField = type === 'avatar' ? 'avatar_url' : 'cover_url';
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ [updateField]: publicUrl })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      setImageUrl(publicUrl);
+      onImageUpdate(publicUrl);
     } catch (error) {
       console.error('Error uploading image:', error);
-      setError('حدث خطأ أثناء رفع الصورة. يرجى المحاولة مرة أخرى.');
+      setError(error.message);
+    } finally {
       setUploading(false);
     }
   };
 
   const removeImage = async () => {
+    if (!user || !imageUrl) return;
+
     setUploading(true);
-    setError('');
+    setError(null);
 
     try {
-      // إزالة الصورة من localStorage
-      const storageKey = type === 'avatar' ? 'userProfileImage' : 'userCoverImage';
-      localStorage.removeItem(storageKey);
-      
-      // تحديث الملف الشخصي في localStorage
-      const userProfile = JSON.parse(localStorage.getItem('userProfile') || '{}');
+      // Extract file path from URL
+      const urlParts = imageUrl.split('/');
+      const fileName = urlParts[urlParts.length - 1];
+      const filePath = `${user.id}/${fileName}`;
+
+      // Remove image from Supabase storage
+      const { error: removeError } = await supabase.storage
+        .from('avatars')
+        .remove([filePath]);
+
+      if (removeError) throw removeError;
+
+      // Update user profile in database (set to null)
       const updateField = type === 'avatar' ? 'avatar_url' : 'cover_url';
-      userProfile[updateField] = null;
-      localStorage.setItem('userProfile', JSON.stringify(userProfile));
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ [updateField]: null })
+        .eq('id', user.id);
 
+      if (updateError) throw updateError;
+
+      setImageUrl(null);
       onImageUpdate(null);
-      onClose();
-
     } catch (error) {
       console.error('Error removing image:', error);
-      setError('حدث خطأ أثناء إزالة الصورة. يرجى المحاولة مرة أخرى.');
+      setError(error.message);
     } finally {
       setUploading(false);
     }
@@ -105,113 +103,38 @@ const ImageUpload = ({ user, type = 'avatar', currentImage, onImageUpdate, onClo
   return (
     <div className="image-upload-overlay">
       <div className="image-upload-modal">
-        <div className="modal-header">
-          <h3>
-            {type === 'avatar' ? 'تحديث الصورة الشخصية' : 'تحديث صورة الغلاف'}
-          </h3>
-          <button className="close-btn" onClick={onClose}>
-            <X size={24} />
-          </button>
-        </div>
-
-        <div className="modal-content">
-          {preview ? (
-            <div className="image-preview">
-              <img 
-                src={preview} 
-                alt="معاينة الصورة" 
-                className={type === 'avatar' ? 'avatar-preview' : 'cover-preview'}
-              />
-            </div>
-          ) : currentImage ? (
-            <div className="current-image">
-              <img 
-                src={currentImage} 
-                alt="الصورة الحالية" 
-                className={type === 'avatar' ? 'avatar-preview' : 'cover-preview'}
-              />
-            </div>
-          ) : (
-            <div className="no-image">
-              <Camera size={48} />
-              <p>لا توجد صورة</p>
-            </div>
-          )}
-
-          <div className="upload-actions">
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              accept="image/*"
-              style={{ display: 'none' }}
-            />
-            
-            <button 
-              className="select-btn"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-            >
-              <Upload size={20} />
-              اختيار صورة
+        <button className="close-btn" onClick={onClose}>
+          <X size={24} />
+        </button>
+        <h2>{type === 'avatar' ? 'رفع صورة الملف الشخصي' : 'رفع صورة الغلاف'}</h2>
+        
+        {imageUrl && (
+          <div className="current-image-preview">
+            <img src={imageUrl} alt={type} />
+            <button className="remove-image-btn" onClick={removeImage} disabled={uploading}>
+              إزالة الصورة
             </button>
-
-            {currentImage && (
-              <button 
-                className="remove-btn"
-                onClick={removeImage}
-                disabled={uploading}
-              >
-                <X size={20} />
-                إزالة الصورة
-              </button>
-            )}
           </div>
+        )}
 
-          {error && (
-            <div className="error-message">
-              {error}
-            </div>
-          )}
-        </div>
-
-        <div className="modal-footer">
-          <button 
-            className="cancel-btn"
-            onClick={onClose}
+        <div className="upload-area">
+          <label htmlFor="single">
+            <UploadCloud size={48} />
+            <p>{uploading ? 'جاري الرفع...' : 'انقر لرفع صورة'}</p>
+          </label>
+          <input
+            type="file"
+            id="single"
+            accept="image/*"
+            onChange={uploadImage}
             disabled={uploading}
-          >
-            إلغاء
-          </button>
-          
-          {preview && (
-            <button 
-              className="upload-btn"
-              onClick={uploadImage}
-              disabled={uploading}
-            >
-              {uploading ? (
-                <div className="loading-spinner"></div>
-              ) : (
-                <>
-                  <Check size={20} />
-                  حفظ الصورة
-                </>
-              )}
-            </button>
-          )}
+          />
         </div>
-
-        <div className="upload-info">
-          <p>
-            • الحد الأقصى لحجم الصورة: 5 ميجابايت<br/>
-            • الصيغ المدعومة: JPG, PNG, GIF<br/>
-            • {type === 'avatar' ? 'الأبعاد المثلى: 400x400 بكسل' : 'الأبعاد المثلى: 1200x400 بكسل'}
-          </p>
-        </div>
+        {error && <p className="error-message">{error}</p>}
       </div>
     </div>
   );
-};
+}
 
 export default ImageUpload;
+
